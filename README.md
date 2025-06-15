@@ -16,4 +16,4 @@
 npm install
 
 # ローカル開発
-npm run dev
+npx vite preview --outDir docs --port 3000
