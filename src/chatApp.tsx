@@ -162,8 +162,8 @@ export default function ChatApp() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const user = "User";
   const { send } = useChatSocket((m) => setMessages((prev) => [...prev, m]));
-
-    useEffect(() => {
+    
+  useEffect(() => {
     // 初期表示時に過去ログを取得
     fetch("/api/logs") // ← ここを適宜調整
       .then((res) => res.json())
@@ -174,7 +174,7 @@ export default function ChatApp() {
         console.error("過去ログ取得失敗:", err);
       });
   }, []);
-
+  
 
   const handleSend = (txt: string) => {
     setMessages((prev) => [
@@ -190,7 +190,7 @@ export default function ChatApp() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-screen-2xl h-[90vh]  flex flex-col p-4">
+    <div className="mx-auto w-full h-[90vh]  flex flex-col p-4">
       <ChatHeader />
       <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-white rounded-2xl shadow p-4 border border-gray-200">
         <ChatMetaPanel user={user} />
