@@ -1,31 +1,61 @@
-import  { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
+
+type Message = {
+  from: "me" | "server";
+  text: string;
+};
 
 function ChatApp() {
-  const [messages, setMessages] = useState<{ from: string; text: string }[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const socketRef = useRef<WebSocket | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimer = useRef<number | null>(null);
 
-  useEffect(() => {
-    // WebSocket接続
-    const socket = new WebSocket(
-        "wss://function-festival-chat-production.up.railway.app/chat"
-    );
-    socketRef.current = socket;
+  const connectWebSocket = () => {
+    const socket = new WebSocket(import.meta.env.VITE_WS_URL);
+    wsRef.current = socket;
 
-    // メッセージ受信時
+    socket.onopen = () => {
+      console.log("WebSocket connected");
+    };
+
     socket.onmessage = (event) => {
       setMessages((prev) => [...prev, { from: "server", text: event.data }]);
     };
 
-    // クリーンアップ
+    socket.onclose = () => {
+      console.log("WebSocket closed");
+    };
+
+    socket.onerror = (e) => {
+      console.error("WebSocket error", e);
+    };
+  };
+
+  useEffect(() => {
+    // 初回接続
+    connectWebSocket();
+
+    // 30秒ごとに再接続
+    reconnectTimer.current = window.setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.close(1000, "Periodic reconnect");
+      }
+      connectWebSocket();
+    }, 30_000);
+
     return () => {
-      socket.close();
+      wsRef.current?.close();
+      if (reconnectTimer.current !== null) {
+        clearInterval(reconnectTimer.current);
+      }
     };
   }, []);
 
   const sendMessage = () => {
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(input);
+    const socket = wsRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(input);
       setMessages((prev) => [...prev, { from: "me", text: input }]);
       setInput("");
     }
@@ -34,7 +64,14 @@ function ChatApp() {
   return (
     <div style={{ padding: 20 }}>
       <h2>Scala Chat</h2>
-      <div style={{ border: "1px solid gray", padding: 10, height: 200, overflowY: "scroll" }}>
+      <div
+        style={{
+          border: "1px solid gray",
+          padding: 10,
+          height: 200,
+          overflowY: "scroll",
+        }}
+      >
         {messages.map((msg, idx) => (
           <div key={idx}>
             <b>{msg.from === "me" ? "You" : "Server"}:</b> {msg.text}
