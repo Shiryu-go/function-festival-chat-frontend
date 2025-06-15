@@ -5,7 +5,9 @@ import './index.css';
 function App() {
   return (
     <>
-      <ChatApp></ChatApp>
+      <div className="overflow-x-hidden ">
+        <ChatApp></ChatApp>
+      </div>
     </>
   )
 }
