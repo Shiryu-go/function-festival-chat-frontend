@@ -1,92 +1,169 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { motion } from "framer-motion";
 
-type Message = {
+/** ------------------------------------------------------------------
+ * Domain types
+ * ------------------------------------------------------------------*/
+export type ChatMsg = {
+  id: string;
   from: "me" | "server";
   text: string;
+  user: string;
 };
 
-function ChatApp() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
+/** ------------------------------------------------------------------
+ * WebSocket hook (30-sec periodic reconnect)
+ * ------------------------------------------------------------------*/
+function useChatSocket(onMessage: (m: ChatMsg) => void) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<number | null>(null);
 
-  const connectWebSocket = () => {
-    const socket = new WebSocket(import.meta.env.VITE_WS_URL);
-    wsRef.current = socket;
+  const connect = () => {
+    wsRef.current = new WebSocket(import.meta.env.VITE_WS_URL);
 
-    socket.onopen = () => {
-      console.log("WebSocket connected");
-    };
-
-    socket.onmessage = (event) => {
-      setMessages((prev) => [...prev, { from: "server", text: event.data }]);
-    };
-
-    socket.onclose = () => {
-      console.log("WebSocket closed");
-    };
-
-    socket.onerror = (e) => {
+    wsRef.current.addEventListener("open", () => {
+      console.info("🔌 WebSocket connected");
+    });
+    wsRef.current.addEventListener("message", (ev) => {
+      onMessage({ id: crypto.randomUUID(), from: "server", text: ev.data, user: "User" });
+    });
+    wsRef.current.addEventListener("close", () => {
+      console.warn("WebSocket closed – scheduling reconnect");
+    });
+    wsRef.current.addEventListener("error", (e) => {
       console.error("WebSocket error", e);
-    };
+    });
   };
 
   useEffect(() => {
-    // 初回接続
-    connectWebSocket();
-
-    // 30秒ごとに再接続
+    connect();
     reconnectTimer.current = window.setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.close(1000, "Periodic reconnect");
-      }
-      connectWebSocket();
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) ws.close(1000, "periodic");
+      connect();
     }, 30_000);
 
     return () => {
       wsRef.current?.close();
-      if (reconnectTimer.current !== null) {
-        clearInterval(reconnectTimer.current);
-      }
+      reconnectTimer.current && clearInterval(reconnectTimer.current);
     };
   }, []);
 
-  const sendMessage = () => {
-    const socket = wsRef.current;
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(input);
-      setMessages((prev) => [...prev, { from: "me", text: input }]);
-      setInput("");
+  const send = (msg: string) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg);
+  };
+
+  return { send };
+}
+
+/** ------------------------------------------------------------------
+ * Presentational components
+ * ------------------------------------------------------------------*/
+const ChatHeader = () => (
+  <header className="text-xl font-semibold mb-4">Scala Chat</header>
+);
+
+const ChatMessage = ({ msg }: { msg: ChatMsg }) => {
+  const isMe = msg.from === "me";
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`mb-2 flex ${isMe ? "justify-end" : "justify-start"}`}
+    >
+      <div className={`flex max-w-[75%] items-end ${isMe ? "flex-row-reverse" : "flex-row"}`}>
+        <div className={`text-xs text-gray-500 ${isMe ? "ml-2" : "mr-2"}`}>{msg.user}</div>
+        <div
+          className={`rounded-xl px-4 py-2 whitespace-pre-wrap shadow text-sm break-words ${
+            isMe ? "bg-blue-500 text-white rounded-br-none" : "bg-gray-200 text-gray-800 rounded-bl-none"
+          }`}
+        >
+          {msg.text}
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
+const MessageList = ({ list }: { list: ChatMsg[] }) => {
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [list]);
+  return (
+    <div className="flex-1 overflow-y-auto px-2 space-y-2">
+      {list.map((m) => (
+        <ChatMessage key={m.id} msg={m} />
+      ))}
+      <div ref={bottomRef} />
+    </div>
+  );
+};
+
+const ChatInput = ({ onSend }: { onSend: (txt: string) => void }) => {
+  const [draft, setDraft] = useState("");
+  const handleSend = () => {
+    if (draft.trim()) {
+      onSend(draft.trim());
+      setDraft("");
     }
+  };
+  return (
+    <div className="mt-3">
+      <textarea
+        className="w-full rounded-2xl border border-gray-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-400"
+        rows={2}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            handleSend();
+          }
+        }}
+        placeholder="Aa"
+      />
+    </div>
+  );
+};
+
+const ChatMetaPanel = ({ user }: { user: string }) => (
+  <div className="flex items-center justify-between mb-2 text-sm text-gray-600">
+    <span className="italic">Connected as:</span>
+    <span className="font-semibold">{user}</span>
+  </div>
+);
+
+/** ------------------------------------------------------------------
+ * Main container component
+ * ------------------------------------------------------------------*/
+export default function ChatApp() {
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const user = "User";
+  const { send } = useChatSocket((m) => setMessages((prev) => [...prev, m]));
+
+  const handleSend = (txt: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        from: "me",
+        text: txt,
+        user: user,
+      },
+    ]);
+    send(txt);
   };
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>Scala Chat</h2>
-      <div
-        style={{
-          border: "1px solid gray",
-          padding: 10,
-          height: 200,
-          overflowY: "scroll",
-        }}
-      >
-        {messages.map((msg, idx) => (
-          <div key={idx}>
-            <b>{msg.from === "me" ? "You" : "Server"}:</b> {msg.text}
-          </div>
-        ))}
+    <div className="mx-auto max-w-lg h-[90vh] md:h-[80vh] flex flex-col p-4">
+      <ChatHeader />
+      <div className="flex-1 flex flex-col bg-white rounded-2xl shadow p-4 border border-gray-200">
+        <ChatMetaPanel user={user} />
+        <MessageList list={messages} />
+        <ChatInput onSend={handleSend} />
       </div>
-      <input
-        type="text"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-      />
-      <button onClick={sendMessage}>Send</button>
     </div>
   );
 }
-
-export default ChatApp;
